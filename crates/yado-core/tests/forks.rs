@@ -223,6 +223,43 @@ all_dbs!(fork_ids_options_and_errors, backend, {
     ));
 });
 
+all_dbs!(fork_swaps_children_by_original_step, backend, {
+    let db = TestDb::migrated(backend).await;
+    let engine = engine(&db).await;
+    let run = begin_run(&engine, "p").await;
+    let lease = yado_core::Lease {
+        workflow_id: "p".into(),
+        token: run.token().into(),
+    };
+    for (step, id) in [(1, "a"), (2, "b")] {
+        let record = StepRecord {
+            child_workflow_id: Some(id.into()),
+            ..StepRecord::default()
+        };
+        engine
+            .store()
+            .save_step(&lease, step, "child", &record)
+            .await
+            .unwrap();
+    }
+    let options = ForkOptions {
+        replacement_children: HashMap::from([("a".into(), "b".into()), ("b".into(), "a".into())]),
+        ..ForkOptions::default()
+    };
+    engine
+        .fork_workflow("p", 3, Some("fork"), &[], &options)
+        .await
+        .unwrap();
+    for (id, expected) in [("p", ["a", "b"]), ("fork", ["b", "a"])] {
+        let steps = engine.list_steps(id).await.unwrap();
+        let children: Vec<_> = steps
+            .iter()
+            .map(|step| step.record.child_workflow_id.as_deref().unwrap())
+            .collect();
+        assert_eq!(children, expected);
+    }
+});
+
 all_dbs!(fork_onto_a_queue_waits_for_admission, backend, {
     let db = TestDb::migrated(backend).await;
     let engine = engine(&db).await;
