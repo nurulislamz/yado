@@ -135,15 +135,27 @@ impl Store {
         .bind(i64::from(start_step))
         .execute(&mut *tx)
         .await?;
-        for (from, to) in &options.replacement_children {
-            sqlx::query(self.sql(
-                "UPDATE operation_outputs SET child_workflow_id = ? WHERE workflow_uuid = ? AND child_workflow_id = ?",
+        if !options.replacement_children.is_empty() {
+            let children: Vec<(i64, String)> = sqlx::query_as(self.sql(
+                "SELECT function_id, child_workflow_id FROM operation_outputs \
+                 WHERE workflow_uuid = ? AND function_id < ? AND child_workflow_id IS NOT NULL",
             ))
-            .bind(to.as_str())
-            .bind(new_id)
-            .bind(from.as_str())
-            .execute(&mut *tx)
+            .bind(original)
+            .bind(i64::from(start_step))
+            .fetch_all(&mut *tx)
             .await?;
+            for (step, child) in children {
+                if let Some(replacement) = options.replacement_children.get(&child) {
+                    sqlx::query(self.sql(
+                        "UPDATE operation_outputs SET child_workflow_id = ? WHERE workflow_uuid = ? AND function_id = ?",
+                    ))
+                    .bind(replacement.as_str())
+                    .bind(new_id)
+                    .bind(step)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
         }
         if let Some(cutoff) = self.kept_until(&mut tx, original, start_step).await? {
             sqlx::query(self.sql(

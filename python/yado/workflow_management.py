@@ -22,18 +22,13 @@ def _millis(value: str | None) -> int | None:
 
 
 def _handles(instance: Any, handle: Any, workflow_ids: list[str], claims: list[Any]) -> list[Any]:
-    by_id = {claim.workflow_id: claim for claim in claims}
-    handles = []
-    for workflow_id in workflow_ids:
-        claim = by_id.get(workflow_id)
-        if claim is None:
-            handles.append(handle(workflow_id))
-            continue
-        started = instance._resume(claim)
-        handles.append(handle(started.workflow_id, started._local))
-    if len(by_id) < len(workflow_ids):
+    started = {claim.workflow_id: instance._resume(claim) for claim in claims}
+    if any(workflow_id not in started for workflow_id in workflow_ids):
         instance._wake_queues()
-    return handles
+    return [
+        handle(workflow_id, started[workflow_id]._local) if workflow_id in started else handle(workflow_id)
+        for workflow_id in workflow_ids
+    ]
 
 
 def _dbos() -> Any:

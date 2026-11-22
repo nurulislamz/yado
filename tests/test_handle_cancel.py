@@ -275,3 +275,21 @@ def test_destroy_during_get_result_does_not_strand_the_caller(dbos: DBOS, gate: 
     timer.join()
     waiter.join(_BOUND)
     assert ended
+
+
+@pytest.mark.parametrize("async_resume", [False, True])
+async def test_bulk_resume_launches_duplicate_id_once(dbos: DBOS, gate: Callable[[], threading.Event], async_resume: bool) -> None:
+    release, entered = gate(), threading.Event()
+    blocked = _blocked_workflow(release, entered)
+    handle = await DBOS.start_workflow_async(blocked)
+    assert await asyncio.to_thread(entered.wait, _BOUND)
+    ids = [handle.workflow_id, handle.workflow_id]
+    await DBOS.cancel_workflow_async(handle.workflow_id)
+    if async_resume:
+        resumed = await DBOS.resume_workflows_async(ids)
+    else:
+        resumed = await asyncio.to_thread(DBOS.resume_workflows, ids)
+    assert [item.workflow_id for item in resumed] == ids
+    assert resumed[0]._local is not None
+    assert resumed[0]._local is resumed[1]._local
+    release.set()
